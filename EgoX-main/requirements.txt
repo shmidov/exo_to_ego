@@ -11,3 +11,4 @@ imageio
 imageio-ffmpeg
 tyro
 ftfy
+huggingface_hub

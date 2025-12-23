@@ -24,26 +24,31 @@ def _set_seed(seed: Optional[int]) -> None:
 def main(args):
     _set_seed(args.seed)
 
-    prompt_list = []
-    with open(args.prompt, 'r') as f:
-        for line in f.readlines():
-            prompt_list.append(line.strip())
-
-    exo_video_list = []
-    with open(args.exo_video_path, 'r') as f:
-        for line in f.readlines():
-            exo_video_list.append(line.strip())
-
-    ego_prior_video_list = []
-    with open(args.ego_prior_video_path, 'r') as f:
-        for line in f.readlines():
-            ego_prior_video_list.append(line.strip())
-    
-    assert len(prompt_list) == len(exo_video_list) == len(ego_prior_video_list)
-
     meta_data_file = args.meta_data_file
     depth_root = args.depth_root
     meta_data = load_from_json_file(meta_data_file)
+    meta_data = meta_data['test_datasets']
+    
+    prompt_list = [md['prompt'] for md in meta_data]
+    exo_video_list = [md['exo_path'] for md in meta_data]
+    ego_prior_video_list = [md['ego_prior_path'] for md in meta_data]
+
+    # prompt_list = []
+    # with open(args.prompt, 'r') as f:
+    #     for line in f.readlines():
+    #         prompt_list.append(line.strip())
+
+    # exo_video_list = []
+    # with open(args.exo_video_path, 'r') as f:
+    #     for line in f.readlines():
+    #         exo_video_list.append(line.strip())
+
+    # ego_prior_video_list = []
+    # with open(args.ego_prior_video_path, 'r') as f:
+    #     for line in f.readlines():
+    #         ego_prior_video_list.append(line.strip())
+    
+    assert len(prompt_list) == len(exo_video_list) == len(ego_prior_video_list)
 
     prompts = prompt_list
     exo_videos = exo_video_list
@@ -54,8 +59,6 @@ def main(args):
     ego_extrinsics = []
     ego_intrinsics = []
     take_names = []
-
-    meta_data = meta_data['test_datasets']
 
     i = 0
     for ego_filename, meta in enumerate(meta_data):
@@ -282,9 +285,9 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate a video from a text prompt using Wan")
-    parser.add_argument("--prompt", type=str, required=True, help="prompt path list.txt")
-    parser.add_argument("--exo_video_path", type=str, required=True, help="exo video path list.txt")
-    parser.add_argument("--ego_prior_video_path", type=str, required=True, help="ego prior video path list.txt")
+    parser.add_argument("--prompt", type=str, required=False, help="prompt path list.txt")
+    parser.add_argument("--exo_video_path", type=str, required=False, help="exo video path list.txt")
+    parser.add_argument("--ego_prior_video_path", type=str, required=False, help="ego prior video path list.txt")
     parser.add_argument("--idx", type=int, default=-1)
     parser.add_argument("--model_path", type=str, default=None, help="The path of the SFT weights to be used")
     parser.add_argument("--out", type=str, default="/outputs", help="The path save generated video")
