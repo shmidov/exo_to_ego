@@ -1,0 +1,3 @@
+[submodule "EgoX-EgoPriorRenderer"]
+	path = EgoX-EgoPriorRenderer
+	url = https://github.com/kdh8156/EgoX-EgoPriorRenderer.git

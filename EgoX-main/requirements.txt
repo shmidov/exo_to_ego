@@ -1,0 +1,13 @@
+diffusers==0.34.0
+transformers==4.49.0
+accelerate==1.5.2
+sentencepiece
+peft==0.17.1
+wandb
+decord
+deepspeed
+opencv-python-headless
+imageio
+imageio-ffmpeg
+tyro
+ftfy
