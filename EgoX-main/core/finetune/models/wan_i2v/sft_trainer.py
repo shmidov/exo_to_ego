@@ -196,7 +196,8 @@ class WanWidthConcatImageToVideoPipeline(WanImageToVideoPipeline):
         """Encode video to latent space (copied from Trainer)"""
         # shape of input video: [B, C, F, H, W]
         vae = self.vae
-        video = video.to(vae.device, dtype=vae.dtype)
+        # video = video.to(device=next(self.vae.parameters()).device, dtype=vae.dtype)
+        video = video.to(device="cuda:0", dtype=vae.dtype)
         
         # Ensure video is in [B, C, F, H, W] format
         if video.dim() == 5 and video.shape[1] != 3:
@@ -599,6 +600,8 @@ class WanWidthConcatImageToVideoPipeline(WanImageToVideoPipeline):
                 self._current_timestep = t
                 latent_model_input = torch.cat([latents, condition], dim=1).to(transformer_dtype)
                 timestep = t.expand(latents.shape[0])
+
+                torch.cuda.empty_cache()
 
                 noise_pred = self.transformer(
                     hidden_states=latent_model_input,

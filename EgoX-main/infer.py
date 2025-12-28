@@ -84,17 +84,26 @@ def main(args):
     from core.finetune.models.wan_i2v.custom_transformer import WanTransformer3DModel_GGA as WanTransformer3DModel
     transformer = WanTransformer3DModel.from_pretrained(transformer_path, torch_dtype=dtype)
 
-    image_encoder = CLIPVisionModel.from_pretrained(model_path, subfolder="image_encoder", torch_dtype=torch.float32)
+    image_encoder = CLIPVisionModel.from_pretrained(model_path, subfolder="image_encoder", torch_dtype=dtype)
 
     from core.finetune.models.wan_i2v.sft_trainer import WanWidthConcatImageToVideoPipeline
     pipe = WanWidthConcatImageToVideoPipeline.from_pretrained(model_path, image_encoder=image_encoder, transformer=transformer, torch_dtype=dtype)
+    # pipe.hf_device_map = {"vae": 0, "image_encoder": "cpu", "transformer": 1}
     
     if lora_path:
         print('loading lora')
         pipe.load_lora_weights(lora_path, weight_name="pytorch_lora_weights.safetensors")
         pipe.fuse_lora(components=["transformer"], lora_scale = 1.0 )
 
-    pipe.to("cuda")
+    # pipe.vae.to("cuda:0", dtype=dtype)
+    # pipe.image_encoder.to("cpu", dtype=dtype)
+    # pipe.transformer.to("cuda:1", dtype=dtype)
+
+    pipe.enable_model_cpu_offload()
+    # torch.backends.cuda.enable_flash_sdp(True)
+    # torch.backends.cuda.enable_mem_efficient_sdp(True)
+    # torch.backends.cuda.enable_math_sdp(False)
+    # pipe.to("cuda", dtype=dtype)
 
     os.makedirs(args.out, exist_ok=True)
     for i in range(len(prompts)):

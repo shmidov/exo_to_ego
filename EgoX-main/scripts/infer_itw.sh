@@ -3,6 +3,7 @@ GPU_IDS=0,1
 SEED=846514
 
 export CUDA_VISIBLE_DEVICES=$GPU_IDS
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 echo "Using GPUs: $GPU_IDS"
 

@@ -645,7 +645,10 @@ class WanTransformer3DModel_GGA(ModelMixin, ConfigMixin, PeftAdapterMixin, FromO
             #! Scaling with hyperparameter
             if cos_sim_scaling_factor > 1.0:
                 mask = cos_sim > 0
-                cos_sim[mask] = cos_sim[mask] * cos_sim_scaling_factor
+                # cos_sim[mask] = cos_sim[mask] * cos_sim_scaling_factor
+                scale = torch.ones_like(cos_sim)
+                scale = scale.masked_fill(mask, cos_sim_scaling_factor)
+                cos_sim.mul_(scale)
             else:
                 cos_sim = cos_sim * cos_sim_scaling_factor
 
