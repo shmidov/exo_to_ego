@@ -1,0 +1,6 @@
+#!/bin/bash  
+#SBATCH --ntasks=1  
+#SBATCH --gpus=1 
+#SBATCH --qos=basic  
+
+srun -p mig,work -G 1 --container-image /home/shmidov/work/exo_to_ego/exo_to_ego.sqsh --container-mounts /home/shmidov/work/exo_to_ego:/workspace printf "Hello world!"

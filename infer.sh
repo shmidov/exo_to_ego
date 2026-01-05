@@ -1,5 +1,5 @@
 #!/bin/bash
-GPU_IDS=0,1
+GPU_IDS=0
 SEED=846514
 
 export CUDA_VISIBLE_DEVICES=$GPU_IDS

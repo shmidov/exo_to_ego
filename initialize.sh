@@ -10,6 +10,7 @@ conda create -n exo_to_ego python=3.10 -y
 
 conda activate exo_to_ego
 
+# pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu118  # for A100 on DGX
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install -r ./requirements.txt
 
