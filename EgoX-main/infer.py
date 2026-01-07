@@ -95,15 +95,20 @@ def main(args):
         pipe.load_lora_weights(lora_path, weight_name="pytorch_lora_weights.safetensors")
         pipe.fuse_lora(components=["transformer"], lora_scale = 1.0 )
 
+    pipe.enable_model_cpu_offload()
+
     # pipe.vae.to("cuda:0", dtype=dtype)
     # pipe.image_encoder.to("cpu", dtype=dtype)
-    # pipe.transformer.to("cuda:1", dtype=dtype)
+    pipe.transformer.to("cuda:0", dtype=dtype)
 
-    pipe.enable_model_cpu_offload()
+    # pipe.to("cuda", dtype=dtype)
+    
+    if args.quantize_transformer_8bit:
+        pipe.quantize_transformer_int8()
+
     # torch.backends.cuda.enable_flash_sdp(True)
     # torch.backends.cuda.enable_mem_efficient_sdp(True)
     # torch.backends.cuda.enable_math_sdp(False)
-    # pipe.to("cuda", dtype=dtype)
 
     os.makedirs(args.out, exist_ok=True)
     for i in range(len(prompts)):
@@ -127,142 +132,142 @@ def main(args):
             ego_extrinsic = ego_extrinsics[i]
             ego_intrinsic = ego_intrinsics[i]
 
-            device = 'cpu'
+        device = 'cpu'
 
-            C, F, H, W = 16, 13, 56, 154 #! Hard coding
-            exo_H, exo_W = H, W - H
-            W = H
+        C, F, H, W = 16, 13, 56, 154 #! Hard coding
+        exo_H, exo_W = H, W - H
+        W = H
 
-            depth_maps = []
-            for depth_map_file in sorted(depth_map_path.glob("*.npy")):
-                depth_map = np.load(depth_map_file)
-                depth_maps.append(torch.from_numpy(depth_map).unsqueeze(0))
-            depth_maps = torch.cat(depth_maps, dim=0) # [F, H, W]
+        depth_maps = []
+        for depth_map_file in sorted(depth_map_path.glob("*.npy")):
+            depth_map = np.load(depth_map_file)
+            depth_maps.append(torch.from_numpy(depth_map).unsqueeze(0))
+        depth_maps = torch.cat(depth_maps, dim=0) # [F, H, W]
 
-            ego_intrinsic=torch.tensor(ego_intrinsic)           #! (3,3)
-            ego_extrinsic=torch.tensor(ego_extrinsic)           #! (F, 3, 4)
-            camera_extrinsic=torch.tensor(camera_extrinsic)     #! (3,4)
-            camera_intrinsic=torch.tensor(camera_intrinsic)     #! (3,3)
+        ego_intrinsic=torch.tensor(ego_intrinsic)           #! (3,3)
+        ego_extrinsic=torch.tensor(ego_extrinsic)           #! (F, 3, 4)
+        camera_extrinsic=torch.tensor(camera_extrinsic)     #! (3,4)
+        camera_intrinsic=torch.tensor(camera_intrinsic)     #! (3,3)
 
-            if ego_extrinsic.shape[1] == 3 and ego_extrinsic.shape[2] == 4:
-                ego_extrinsic = torch.cat([ego_extrinsic, torch.tensor([[[0, 0, 0, 1]]], dtype=ego_extrinsic.dtype).expand(ego_extrinsic.shape[0], -1, -1)], dim=1)
-            if camera_extrinsic.shape == (3, 4):
-                camera_extrinsic = torch.cat([torch.tensor(camera_extrinsic, dtype=ego_extrinsic.dtype), torch.tensor([[0, 0, 0, 1]], dtype=ego_extrinsic.dtype)], dim=0)
+        if ego_extrinsic.shape[1] == 3 and ego_extrinsic.shape[2] == 4:
+            ego_extrinsic = torch.cat([ego_extrinsic, torch.tensor([[[0, 0, 0, 1]]], dtype=ego_extrinsic.dtype).expand(ego_extrinsic.shape[0], -1, -1)], dim=1)
+        if camera_extrinsic.shape == (3, 4):
+            camera_extrinsic = torch.cat([torch.tensor(camera_extrinsic, dtype=ego_extrinsic.dtype), torch.tensor([[0, 0, 0, 1]], dtype=ego_extrinsic.dtype)], dim=0)
 
-            scale = 1/8
-            scaled_intrinsic = ego_intrinsic.clone()
-            scaled_intrinsic[0, 0] *= scale  # fx' = fx * s
-            scaled_intrinsic[1, 1] *= scale  # fy' = fy * s
-            scaled_intrinsic[0, 2] *= scale  # cx' = cx * s
-            scaled_intrinsic[1, 2] *= scale
+        scale = 1/8
+        scaled_intrinsic = ego_intrinsic.clone()
+        scaled_intrinsic[0, 0] *= scale  # fx' = fx * s
+        scaled_intrinsic[1, 1] *= scale  # fy' = fy * s
+        scaled_intrinsic[0, 2] *= scale  # cx' = cx * s
+        scaled_intrinsic[1, 2] *= scale
 
-            ys, xs = torch.meshgrid(torch.arange(H, device=device), torch.arange(W, device=device))
-            ones = torch.ones_like(xs)
-            pixel_coords = torch.stack([xs, ys, ones], dim=-1).view(-1, 3).to(dtype=ego_intrinsic.dtype)  # (H*W, 3)
+        ys, xs = torch.meshgrid(torch.arange(H, device=device), torch.arange(W, device=device))
+        ones = torch.ones_like(xs)
+        pixel_coords = torch.stack([xs, ys, ones], dim=-1).view(-1, 3).to(dtype=ego_intrinsic.dtype)  # (H*W, 3)
 
-            pixel_coords_cv = pixel_coords[..., :2].cpu().numpy().reshape(-1, 1, 2).astype(np.float32)
-            K = scaled_intrinsic.cpu().numpy().astype(np.float32)
+        pixel_coords_cv = pixel_coords[..., :2].cpu().numpy().reshape(-1, 1, 2).astype(np.float32)
+        K = scaled_intrinsic.cpu().numpy().astype(np.float32)
 
-            import cv2
-            #! Ego cam distorion coeffs (Project Aria) - Hard coded
-            distortion_coeffs = np.array([[-0.02340373583137989,0.09388021379709244,-0.06088035926222801,0.0053304750472307205,0.003342868760228157,-0.0006356257363222539,0.0005087381578050554,-0.0004747129278257489,-0.0011330085108056664,-0.00025734835071489215,0.00009328465239377692,0.00009424977179151028]])
-            D = distortion_coeffs.astype(np.float32) # ex: [k1, k2, k3, k4, k5, k6, p1, p2, s1, s2, s3, s4]
-            normalized_points = cv2.undistortPoints(pixel_coords_cv, K, D, R=np.eye(3), P=np.eye(3))
+        import cv2
+        #! Ego cam distorion coeffs (Project Aria) - Hard coded
+        distortion_coeffs = np.array([[-0.02340373583137989,0.09388021379709244,-0.06088035926222801,0.0053304750472307205,0.003342868760228157,-0.0006356257363222539,0.0005087381578050554,-0.0004747129278257489,-0.0011330085108056664,-0.00025734835071489215,0.00009328465239377692,0.00009424977179151028]])
+        D = distortion_coeffs.astype(np.float32) # ex: [k1, k2, k3, k4, k5, k6, p1, p2, s1, s2, s3, s4]
+        normalized_points = cv2.undistortPoints(pixel_coords_cv, K, D, R=np.eye(3), P=np.eye(3))
 
 
-            normalized_points = torch.from_numpy(normalized_points).squeeze(1).to(device) # (N, 2)
+        normalized_points = torch.from_numpy(normalized_points).squeeze(1).to(device) # (N, 2)
 
-            ones = torch.ones_like(normalized_points[..., :1])
-            cam_rays_fish = torch.cat([normalized_points, ones], dim=-1) # (N, 3)
+        ones = torch.ones_like(normalized_points[..., :1])
+        cam_rays_fish = torch.cat([normalized_points, ones], dim=-1) # (N, 3)
 
-            cam_rays = cam_rays_fish / torch.norm(cam_rays_fish, dim=-1, keepdim=True)
+        cam_rays = cam_rays_fish / torch.norm(cam_rays_fish, dim=-1, keepdim=True)
 
-            cam_rays = cam_rays @ ego_extrinsic[::4, :3, :3]
+        cam_rays = cam_rays @ ego_extrinsic[::4, :3, :3]
 
-            cam_rays = cam_rays.view(F, H, W, 3)  # (B, H, W, 3)
+        cam_rays = cam_rays.view(F, H, W, 3)  # (B, H, W, 3)
 
-            height, width = depth_maps.shape[1], depth_maps.shape[2]
-            cx = width / 2.0
-            cy = height / 2.0
-            camera_intrinsic_scale_y = cy / camera_intrinsic[1,2]
-            camera_intrinsic_scale_x = cx / camera_intrinsic[0,2]
-            camera_intrinsic[0, 0] = camera_intrinsic[0, 0] * camera_intrinsic_scale_x
-            camera_intrinsic[1, 1] = camera_intrinsic[1, 1] * camera_intrinsic_scale_y
-            camera_intrinsic[0, 2] = cx
-            camera_intrinsic[1, 2] = cy
+        height, width = depth_maps.shape[1], depth_maps.shape[2]
+        cx = width / 2.0
+        cy = height / 2.0
+        camera_intrinsic_scale_y = cy / camera_intrinsic[1,2]
+        camera_intrinsic_scale_x = cx / camera_intrinsic[0,2]
+        camera_intrinsic[0, 0] = camera_intrinsic[0, 0] * camera_intrinsic_scale_x
+        camera_intrinsic[1, 1] = camera_intrinsic[1, 1] * camera_intrinsic_scale_y
+        camera_intrinsic[0, 2] = cx
+        camera_intrinsic[1, 2] = cy
 
-            camera_intrinsic = np.array([camera_intrinsic[0, 0] , camera_intrinsic[1, 1], cx, cy])
-            
-            disp_v, disp_u = torch.meshgrid(
-                torch.arange(depth_maps.shape[1], device=device).float(),
-                torch.arange(depth_maps.shape[2],device=device).float(),
-                indexing="ij",
-            )
+        camera_intrinsic = np.array([camera_intrinsic[0, 0] , camera_intrinsic[1, 1], cx, cy])
 
-            disp = torch.ones_like(disp_v)
+        disp_v, disp_u = torch.meshgrid(
+            torch.arange(depth_maps.shape[1], device=device).float(),
+            torch.arange(depth_maps.shape[2],device=device).float(),
+            indexing="ij",
+        )
 
-            disp_cpu = disp.cpu()
-            disp_u_cpu = disp_u.cpu()
-            disp_v_cpu = disp_v.cpu()
-            
-            pts, _, _ = iproj_disp(torch.from_numpy(camera_intrinsic), disp_cpu, disp_u_cpu, disp_v_cpu)
+        disp = torch.ones_like(disp_v)
 
-            if isinstance(pts, torch.Tensor):
-                pts = pts.to(device)
-            else:
-                pts = torch.from_numpy(pts).to(device).float()
-            
-            rays = pts[..., :3] 
+        disp_cpu = disp.cpu()
+        disp_u_cpu = disp_u.cpu()
+        disp_v_cpu = disp_v.cpu()
 
-            rays = rays / rays[..., 2:3]    
-            rays = rays.unsqueeze(0).expand(depth_maps.size(0), -1, -1, -1)  # (F, H, W, 3)
-            camera_extrinsics_c2w = torch.linalg.inv(camera_extrinsic)
+        pts, _, _ = iproj_disp(torch.from_numpy(camera_intrinsic), disp_cpu, disp_u_cpu, disp_v_cpu)
 
-            pcd_camera = rays * depth_maps.unsqueeze(-1)
-            point_map = pcd_camera.to(dtype=camera_extrinsics_c2w.dtype)
-            point_map = torch.tensor(point_map) #! [F, H, W, 3]
-
-            p_f, p_h, p_w, p_p = point_map.shape
-            point_map_world = point_map.reshape(-1, 3)
-
-            camera_extrinsics_c2w = torch.linalg.inv(camera_extrinsic)
-            ones_point = torch.ones(point_map_world.shape[0], 1, device=point_map_world.device)
-            point_map_world = torch.cat([point_map_world, ones_point], dim=-1) #! [F, H*W, 4]
-            point_map_world = (camera_extrinsics_c2w @ point_map_world.T).T[...,:3]
-            point_map = point_map_world.reshape(p_f, p_h, p_w, 3).permute(0, 3, 1, 2)
-
-            point_map = point_map[:, :, (point_map.shape[2] - 448)//2:(point_map.shape[2] + 448)//2, (point_map.shape[3] - 784)//2:(point_map.shape[3] + 784)//2] #! [F, 3, 448, 784]
-            point_map = torch.nn.functional.interpolate(point_map, size=(exo_H, exo_W), mode='bilinear', align_corners=False).permute(0, 2, 3, 1) #! [B, H, W, 3]
-
-            ego_extrinsic_c2w = torch.linalg.inv(ego_extrinsic)
-
-            cam_origins = ego_extrinsic_c2w[::4, :3, 3].unsqueeze(1).expand(-1, exo_H * exo_W, -1)  # (B, H*W, 3)
-            cam_origins = cam_origins.view(F, exo_H, exo_W, 3)  # (B, H, W, 3)
-
-            if point_map.size(0) != ego_extrinsic_c2w.size(0):
-                min_size = min(point_map.size(0), ego_extrinsic_c2w.size(0))
-                point_map = point_map[:min_size]
-            
-
-            point_vecs_per_frame = []
-            for j in range(cam_origins.size(0)):
-                point_vec = point_map[::4] - cam_origins[j].unsqueeze(0)  #! [B, H, W, 3]
-                point_vec = point_vec / torch.norm(point_vec, dim=-1, keepdim=True)  #! [B,H, W, 3]
-                point_vecs_per_frame.append(point_vec)
-            point_vecs_per_frame = torch.stack(point_vecs_per_frame, dim=0)  #! [B, B, H, W, 3]
-
-            point_vecs = point_map[::4] - cam_origins #! [B, H, W, 3]
-            point_vecs = point_vecs / torch.norm(point_vecs, dim=-1, keepdim=True) #! [B, H, W, 3]
-
-            cam_rays = torch.rot90(cam_rays, k=-1, dims=[1, 2])
-
-            attn_maps = torch.cat((point_vecs, cam_rays), dim = 2)
-            attn_masks = torch.cat((torch.ones_like(point_vecs), torch.zeros_like(cam_rays)), dim = 2)
+        if isinstance(pts, torch.Tensor):
+            pts = pts.to(device)
         else:
-            point_vecs_per_frame = None
-            attn_maps = None
-            attn_masks = None
-            cam_rays = None
+            pts = torch.from_numpy(pts).to(device).float()
+
+        rays = pts[..., :3] 
+
+        rays = rays / rays[..., 2:3]    
+        rays = rays.unsqueeze(0).expand(depth_maps.size(0), -1, -1, -1)  # (F, H, W, 3)
+        camera_extrinsics_c2w = torch.linalg.inv(camera_extrinsic)
+
+        pcd_camera = rays * depth_maps.unsqueeze(-1)
+        point_map = pcd_camera.to(dtype=camera_extrinsics_c2w.dtype)
+        point_map = torch.tensor(point_map) #! [F, H, W, 3]
+
+        p_f, p_h, p_w, p_p = point_map.shape
+        point_map_world = point_map.reshape(-1, 3)
+
+        camera_extrinsics_c2w = torch.linalg.inv(camera_extrinsic)
+        ones_point = torch.ones(point_map_world.shape[0], 1, device=point_map_world.device)
+        point_map_world = torch.cat([point_map_world, ones_point], dim=-1) #! [F, H*W, 4]
+        point_map_world = (camera_extrinsics_c2w @ point_map_world.T).T[...,:3]
+        point_map = point_map_world.reshape(p_f, p_h, p_w, 3).permute(0, 3, 1, 2)
+
+        point_map = point_map[:, :, (point_map.shape[2] - 448)//2:(point_map.shape[2] + 448)//2, (point_map.shape[3] - 784)//2:(point_map.shape[3] + 784)//2] #! [F, 3, 448, 784]
+        point_map = torch.nn.functional.interpolate(point_map, size=(exo_H, exo_W), mode='bilinear', align_corners=False).permute(0, 2, 3, 1) #! [B, H, W, 3]
+
+        ego_extrinsic_c2w = torch.linalg.inv(ego_extrinsic)
+
+        cam_origins = ego_extrinsic_c2w[::4, :3, 3].unsqueeze(1).expand(-1, exo_H * exo_W, -1)  # (B, H*W, 3)
+        cam_origins = cam_origins.view(F, exo_H, exo_W, 3)  # (B, H, W, 3)
+
+        if point_map.size(0) != ego_extrinsic_c2w.size(0):
+            min_size = min(point_map.size(0), ego_extrinsic_c2w.size(0))
+            point_map = point_map[:min_size]
+
+
+        point_vecs_per_frame = []
+        for j in range(cam_origins.size(0)):
+            point_vec = point_map[::4] - cam_origins[j].unsqueeze(0)  #! [B, H, W, 3]
+            point_vec = point_vec / torch.norm(point_vec, dim=-1, keepdim=True)  #! [B,H, W, 3]
+            point_vecs_per_frame.append(point_vec)
+        point_vecs_per_frame = torch.stack(point_vecs_per_frame, dim=0)  #! [B, B, H, W, 3]
+
+        point_vecs = point_map[::4] - cam_origins #! [B, H, W, 3]
+        point_vecs = point_vecs / torch.norm(point_vecs, dim=-1, keepdim=True) #! [B, H, W, 3]
+
+        cam_rays = torch.rot90(cam_rays, k=-1, dims=[1, 2])
+
+        attn_maps = torch.cat((point_vecs, cam_rays), dim = 2)
+        attn_masks = torch.cat((torch.ones_like(point_vecs), torch.zeros_like(cam_rays)), dim = 2)
+    else:
+        point_vecs_per_frame = None
+        attn_maps = None
+        attn_masks = None
+        cam_rays = None
 
         output_filename = f'{take_name}.mp4'  
         output_path = os.path.join(args.out, output_filename)
@@ -281,13 +286,16 @@ def main(args):
                 guidance_scale=5.0,
                 fps=30,
                 num_videos_per_prompt=1,
-                seed=args.seed,
+                # seed=args.seed,
+                seed=846514,
                 attention_GGA=attn_maps.unsqueeze(0) if attn_maps is not None else None,
                 attention_mask_GGA=attn_masks.unsqueeze(0) if attn_masks is not None else None,
                 point_vecs_per_frame = point_vecs_per_frame,
                 cam_rays = cam_rays,
-                do_kv_cache = args.do_kv_cache,
-                cos_sim_scaling_factor=args.cos_sim_scaling_factor,
+                # do_kv_cache = args.do_kv_cache,
+                do_kv_cache = True,
+                # cos_sim_scaling_factor=args.cos_sim_scaling_factor,
+                cos_sim_scaling_factor=3.0,
                 pipe = pipe,
             )
 
@@ -311,5 +319,6 @@ if __name__ == "__main__":
     parser.add_argument("--end_idx", type=int, default=-1)
     parser.add_argument("--depth_root", type=str, default="./example/in_the_wild/depth_maps/", help="root path for depth maps")
     parser.add_argument("--in_the_wild", action='store_true', help="whether to use in-the-wild inference")
+    parser.add_argument("--quantize_transformer_8bit", action="store_true", help="quantize transformer Linear layers to 8-bit using bitsandbytes")
     args = parser.parse_args()
     main(args)

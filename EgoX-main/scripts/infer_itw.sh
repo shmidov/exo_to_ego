@@ -1,5 +1,5 @@
 #!/bin/bash
-GPU_IDS=0,1
+GPU_IDS=0
 SEED=846514
 
 export CUDA_VISIBLE_DEVICES=$GPU_IDS
@@ -19,4 +19,5 @@ python3 EgoX-main/infer.py \
     --use_GGA \
     --cos_sim_scaling_factor 3.0 \
     --in_the_wild \
-    --idx 1
+    --idx 1 \
+    --quantize_transformer_8bit

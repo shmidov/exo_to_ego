@@ -12,3 +12,4 @@ imageio-ffmpeg
 tyro
 ftfy
 huggingface_hub
+bitsandbytes

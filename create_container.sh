@@ -7,6 +7,7 @@ echo "🚀 [START] Enroot automated container customization script"
 BASE_IMAGE="nvcr.io#nvidia/pytorch:25.10-py3"
 BASE_SQSH="$PWD/$(echo $BASE_IMAGE | tr ':/' '+').sqsh"
 CONTAINER_NAME="exo_to_ego.sqsh"
+RUN_STEP2=0
 
 # Step 1: Import base image if needed
 if [ ! -f "$BASE_SQSH" ]; then
@@ -17,11 +18,12 @@ else
 fi
 
 # Step 2: Customize container with Python, tmux and other system packages
-echo "🔧 [STEP 2] Installing Python 3.10, tmux and system packages inside container..."
-srun -p mig,work -G 1 \
-  --container-image="$BASE_SQSH" \
-  --container-save="$PWD/$CONTAINER_NAME" \
-  bash <<'EOF'
+if [ "$RUN_STEP2" -eq 1 ]; then
+  echo "🔧 [STEP 2] Installing Python 3.10, tmux and system packages inside container..."
+  srun -p mig,work -G 1 \
+    --container-image="$BASE_SQSH" \
+    --container-save="$PWD/$CONTAINER_NAME" \
+    bash <<'EOF'
 set -e
 
 echo "🔧 [STEP 2] Installing Python 3.10 prerequisites"
@@ -62,11 +64,14 @@ rm -rf /var/lib/apt/lists/*
 
 EOF
 
-if [ $? -ne 0 ]; then
-    echo "❌ Failed in STEP 2: Python/tmux setup"
-    exit 1
+  if [ $? -ne 0 ]; then
+      echo "❌ Failed in STEP 2: Python/tmux setup"
+      exit 1
+  fi
+  echo "✅ [STEP 2] Finished Python 3.10 & tmux setup in container"
+else
+  echo "⏭️ [STEP 2] Skipping Python/tmux system packages (already installed)"
 fi
-echo "✅ [STEP 2] Finished Python 3.10 & tmux setup in container"
 
 
 # Step 3: Mount your code, set up conda env, install packages, and download models
@@ -83,7 +88,10 @@ cd /workspace
 CONDA_ROOT="$HOME/PROGS/anaconda3"
 CONDA_INSTALLER="/tmp/Anaconda3-2022.10-Linux-x86_64.sh"
 REQ_MARKER="/workspace/.exo_to_ego_requirements_installed"
-FORCE_REINSTALL=1
+FORCE_REINSTALL=0
+FORCE_REQUIREMENTS=1
+INSTALL_TORCH=0
+RUN_CHECKPOINTS=0
 
 if [ "$FORCE_REINSTALL" -eq 1 ]; then
   echo "🌀 [STEP 3] Force reinstall enabled, resetting conda install and requirements marker"
@@ -117,24 +125,29 @@ if conda env list | awk '{print $1}' | grep -qx "exo_to_ego"; then
   else
     echo "🌀 [STEP 3] Conda env exo_to_ego already exists"
   fi
+else
+  conda create -n exo_to_ego python=3.10 -y
 fi
-conda create -n exo_to_ego python=3.10 -y
 conda activate exo_to_ego
 
-echo "🌀 [STEP 3] Installing PyTorch (CUDA 12.1)"
-if [ "$FORCE_REINSTALL" -eq 1 ]; then
-  pip3 install --force-reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu118
-else
-  if python -c "import torch" >/dev/null 2>&1; then
-    echo "🌀 [STEP 3] Torch already installed, skipping"
+if [ "$INSTALL_TORCH" -eq 1 ]; then
+  echo "🌀 [STEP 3] Installing PyTorch (CUDA 11.8)"
+  if [ "$FORCE_REINSTALL" -eq 1 ]; then
+    pip3 install --force-reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu118
   else
-    pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+    if python -c "import torch" >/dev/null 2>&1; then
+      echo "🌀 [STEP 3] Torch already installed, skipping"
+    else
+      pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+    fi
   fi
+else
+  echo "⏭️ [STEP 3] Skipping PyTorch install (already installed)"
 fi
 
 echo "🌀 [STEP 3] Installing project requirements"
 if [ -f requirements.txt ]; then
-  if [ "$FORCE_REINSTALL" -eq 1 ]; then
+  if [ "$FORCE_REQUIREMENTS" -eq 1 ]; then
     pip install -r ./requirements.txt
     touch "$REQ_MARKER"
   else
@@ -162,20 +175,24 @@ else
   echo "⚠️ tmux not found in the container (installation step may have failed)"
 fi
 
-echo "🌀 [STEP 3b] Downloading Hugging Face models"
-MODEL_DIR_1="./checkpoints/pretrained_model/Wan2.1-I2V-14B-480P-Diffusers"
-MODEL_DIR_2="./checkpoints/EgoX"
+if [ "$RUN_CHECKPOINTS" -eq 1 ]; then
+  echo "🌀 [STEP 3b] Downloading Hugging Face models"
+  MODEL_DIR_1="./checkpoints/pretrained_model/Wan2.1-I2V-14B-480P-Diffusers"
+  MODEL_DIR_2="./checkpoints/EgoX"
 
-if [ -d "$MODEL_DIR_1" ] && [ "$(ls -A "$MODEL_DIR_1" 2>/dev/null)" ]; then
-  echo "🌀 [STEP 3b] Found existing model at $MODEL_DIR_1"
-else
-  python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='Wan-AI/Wan2.1-I2V-14B-480P-Diffusers', local_dir='$MODEL_DIR_1')"
-fi
+  if [ -d "$MODEL_DIR_1" ] && [ "$(ls -A "$MODEL_DIR_1" 2>/dev/null)" ]; then
+    echo "🌀 [STEP 3b] Found existing model at $MODEL_DIR_1"
+  else
+    python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='Wan-AI/Wan2.1-I2V-14B-480P-Diffusers', local_dir='$MODEL_DIR_1')"
+  fi
 
-if [ -d "$MODEL_DIR_2" ] && [ "$(ls -A "$MODEL_DIR_2" 2>/dev/null)" ]; then
-  echo "🌀 [STEP 3b] Found existing model at $MODEL_DIR_2"
+  if [ -d "$MODEL_DIR_2" ] && [ "$(ls -A "$MODEL_DIR_2" 2>/dev/null)" ]; then
+    echo "🌀 [STEP 3b] Found existing model at $MODEL_DIR_2"
+  else
+    python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='DAVIAN-Robotics/EgoX', local_dir='$MODEL_DIR_2', allow_patterns='*.safetensors')"
+  fi
 else
-  python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='DAVIAN-Robotics/EgoX', local_dir='$MODEL_DIR_2', allow_patterns='*.safetensors')"
+  echo "⏭️ [STEP 3b] Skipping model downloads (already present)"
 fi
 
 echo "✅ Python environment setup done"

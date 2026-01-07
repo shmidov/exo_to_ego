@@ -1,6 +1,7 @@
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch
+import torch.nn as nn
 from diffusers import (
     AutoencoderKLWan,
     FlowMatchEulerDiscreteScheduler,
@@ -60,6 +61,37 @@ from diffusers import (
     WanImageToVideoPipeline,
 )
 from diffusers.utils.torch_utils import randn_tensor
+
+def _replace_linear_with_bnb_int8(module: torch.nn.Module) -> int:
+    try:
+        import bitsandbytes as bnb
+    except ImportError as exc:
+        raise ImportError("bitsandbytes is required for 8-bit quantization. Install it via requirements.txt.") from exc
+
+    replaced = 0
+    for name, child in module.named_children():
+        if isinstance(child, bnb.nn.Linear8bitLt):
+            continue
+        if isinstance(child, nn.Linear):
+            new_linear = bnb.nn.Linear8bitLt(
+                child.in_features,
+                child.out_features,
+                bias=child.bias is not None,
+                has_fp16_weights=False,
+            )
+            weight = child.weight.detach()
+            try:
+                new_linear.weight = bnb.nn.Int8Params(weight, requires_grad=False)
+            except Exception:
+                new_linear.weight = bnb.nn.Int8Params(weight.float(), requires_grad=False)
+            if child.bias is not None:
+                new_linear.bias = nn.Parameter(child.bias.detach())
+            new_linear.to(device=child.weight.device, dtype=child.weight.dtype)
+            setattr(module, name, new_linear)
+            replaced += 1
+        else:
+            replaced += _replace_linear_with_bnb_int8(child)
+    return replaced
 
 def generate_uniform_pointmap(height, width):
     x = np.linspace(-1, 1, width)
@@ -297,6 +329,13 @@ class WanWidthConcatImageToVideoPipeline(WanImageToVideoPipeline):
         image = self.image_processor(images=decoded_image, return_tensors="pt", do_rescale=False).to(device)
         image_embeds = self.image_encoder(**image, output_hidden_states=True)
         return image_embeds.hidden_states[-2]
+
+    def quantize_transformer_int8(self) -> None:
+        replaced = _replace_linear_with_bnb_int8(self.transformer)
+        if replaced == 0:
+            logger.warning("No transformer Linear layers were quantized. Transformer may already be quantized.")
+        else:
+            logger.info("Quantized transformer Linear layers to int8 with bitsandbytes: %d layers.", replaced)
 
     @override
     def check_inputs(
