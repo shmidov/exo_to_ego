@@ -1,0 +1,50 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "name": "Python Debugger: Python File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}"
+        },
+        {
+            "name": "Python: infer_itw.sh (infer.py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/EgoX-main/infer.py",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "--meta_data_file",
+                "./EgoX-main/example/in_the_wild/meta.json",
+                "--depth_root",
+                "./EgoX-main/example/in_the_wild/depth_maps/",
+                "--model_path",
+                "./checkpoints/pretrained_model/Wan2.1-I2V-14B-480P-Diffusers",
+                "--lora_path",
+                "./checkpoints/EgoX/pytorch_lora_weights.safetensors",
+                "--lora_rank",
+                "256",
+                "--out",
+                "./EgoX-mainoutputs",
+                "--seed",
+                "846514",
+                "--use_GGA",
+                "--cos_sim_scaling_factor",
+                "3.0",
+                "--in_the_wild",
+                "--idx",
+                "1",
+                "--quantize_transformer_8bit"
+            ],
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "0",
+                "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"
+            },
+            "justMyCode": false
+        }
+    ]
+}
