@@ -237,3 +237,5 @@
 
 checkpoints/
 *.sqsh
+data/videos/depth_maps
+vipe_results

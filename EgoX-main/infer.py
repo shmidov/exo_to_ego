@@ -347,6 +347,6 @@ if __name__ == "__main__":
     parser.add_argument("--end_idx", type=int, default=-1)
     parser.add_argument("--depth_root", type=str, default="./example/in_the_wild/depth_maps/", help="root path for depth maps")
     parser.add_argument("--in_the_wild", action='store_true', help="whether to use in-the-wild inference")
-    parser.add_argument("--quantize_transformer_8bit", action="store_true", help="quantize transformer Linear layers to 8-bit using bitsandbytes")
+    # parser.add_argument("--quantize_transformer_8bit", action="store_true", help="quantize transformer Linear layers to 8-bit using bitsandbytes")
     args = parser.parse_args()
     main(args)

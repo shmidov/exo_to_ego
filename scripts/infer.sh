@@ -3,16 +3,20 @@ GPU_IDS=0
 SEED=846514
 
 export CUDA_VISIBLE_DEVICES=$GPU_IDS
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 echo "Using GPUs: $GPU_IDS"
 
-python3 infer.py \
-    --meta_data_file ./data/meta.json \
+#! In-the-wild inference
+python3 EgoX-main/infer.py \
+    --meta_data_file ./data/videos/meta.json \
+    --depth_root ./data/videos/depth_maps/ \
     --model_path ./checkpoints/pretrained_model/Wan2.1-I2V-14B-480P-Diffusers \
     --lora_path ./checkpoints/EgoX/pytorch_lora_weights.safetensors \
     --lora_rank 256 \
     --out ./results \
-    --seed 42 \
+    --seed $SEED \
     --use_GGA \
     --cos_sim_scaling_factor 3.0 \
-    --in_the_wild
+    --in_the_wild \
+    --idx 0 \

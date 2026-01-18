@@ -4,6 +4,7 @@ accelerate==1.5.2
 sentencepiece
 peft==0.17.1
 wandb
+protobuf>=6.31.1
 decord
 deepspeed
 opencv-python-headless
